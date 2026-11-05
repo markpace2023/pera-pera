@@ -1,5 +1,7 @@
 # SpendFlow 💳 📊
 
+DISCLAIMER: APP BUILT WITH Google aistudio
+
 SpendFlow is a modern, privacy-first personal finance and expense tracking Android application built with **Kotlin** and **Jetpack Compose (Material 3)**. It offers multi-currency account management, an intelligent debts & loans ledger with interest calculations, AI-powered category suggestions, and real-time net worth conversion.
 
 ---
