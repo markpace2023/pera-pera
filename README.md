@@ -8,12 +8,12 @@ SpendFlow is a modern, privacy-first personal finance and expense tracking Andro
 
 | 🏠 Dashboard & Multi-Currency | 🤝 Debts & Loans Hub |
 | :---: | :---: |
-| <img src="screenshots/dashboard.jpg" width="300" alt="Dashboard Screen"/> | <img src="screenshots/debts_and_loans.jpg" width="300" alt="Debts and Loans Hub"/> |
+| <img src="screenshots/Dashboard.jpg" width="300" alt="Dashboard Screen"/> | <img src="screenshots/Loans.jpg" width="300" alt="Debts and Loans Hub"/> |
 | *Live exchange rate net worth conversion & accounts overview* | *Active loans with interest rates, native currency & ledger* |
 
 | 🏷️ Categories & Budgets | ✍️ Transaction Recording & AI |
 | :---: | :---: |
-| <img src="screenshots/categories_budget.jpg" width="300" alt="Categories and Budgets"/> | <img src="screenshots/transaction_record.jpg" width="300" alt="Record Transaction"/> |
+| <img src="screenshots/Categories.jpg" width="300" alt="Categories and Budgets"/> | <img src="screenshots/Record.jpg" width="300" alt="Record Transaction"/> |
 | *Visual budget tracking & orphan-safe category management* | *✨ AI smart suggestions & reset category state* |
 
 ---
@@ -130,7 +130,7 @@ SpendFlow/
 
 ### 1. Multi-Currency Accounts & Global Net Worth
 <p align="center">
-  <img src="screenshots/dashboard.jpg" width="340" alt="Dashboard Screen"/>
+  <img src="screenshots/Dashboard.jpg" width="340" alt="Dashboard Screen"/>
 </p>
 
 - **Account Currencies**: Set a native currency for every wallet or bank account (e.g., PHP `₱`, USD `$`, EUR `€`, JPY `¥`, GBP `£`, CAD, AUD, SGD).
@@ -144,7 +144,7 @@ SpendFlow/
 
 ### 2. Debts & Loans Hub (Ledger)
 <p align="center">
-  <img src="screenshots/debts_and_loans.jpg" width="340" alt="Debts and Loans Hub"/>
+  <img src="screenshots/Loans.jpg" width="340" alt="Debts and Loans Hub"/>
 </p>
 
 - **Lending & Borrowing Tracking**: Track both money borrowed (liabilities) and money lent out (receivables).
@@ -157,7 +157,7 @@ SpendFlow/
 
 ### 3. Categories & Safe Budgeting
 <p align="center">
-  <img src="screenshots/categories_budget.jpg" width="340" alt="Categories and Budgets"/>
+  <img src="screenshots/Categories.jpg" width="340" alt="Categories and Budgets"/>
 </p>
 
 - **Category Customization**: Color-coded categories with Material Symbols.
@@ -168,7 +168,7 @@ SpendFlow/
 
 ### 4. Transaction Management & AI Categorization
 <p align="center">
-  <img src="screenshots/transaction_record.jpg" width="340" alt="Transaction Recording"/>
+  <img src="screenshots/Record.jpg" width="340" alt="Transaction Recording"/>
 </p>
 
 - **Transaction Types**: Expense, Income, and Internal Account Transfers.
