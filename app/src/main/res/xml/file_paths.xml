@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="backup_files" path="backups/" />
+    <cache-path name="csv_files" path="reports/" />
+    <files-path name="internal_backups" path="backups/" />
+    <files-path name="bank_icons" path="bank_icons/" />
+    <files-path name="database_files" path="../databases/" />
+    <external-files-path name="external_docs" path="Documents/" />
+</paths>

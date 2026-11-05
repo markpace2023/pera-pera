@@ -1,0 +1,8 @@
+{
+  "name": "SpendFlow",
+  "description": "Smart expense and income tracker with multi-currency accounts, debts & loans ledger, AI category suggestions, transfers, and detailed analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
