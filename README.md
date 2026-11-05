@@ -98,7 +98,7 @@ SpendFlow/
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/your-username/spendflow.git
+   git clone https://github.com/markpace2023/pera-pera.git
    cd spendflow
    ```
 
