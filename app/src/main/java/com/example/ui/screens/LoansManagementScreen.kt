@@ -827,9 +827,9 @@ fun LoansManagementScreen(
                     loanPerson = loan.loanPerson
                 )
 
-                // Save last used account & category
-                UserPreferences.setLastUsedAccountId(context, selectedAccountId)
-                matchedCategory?.let { UserPreferences.setLastUsedCategoryId(context, resolvedType, it.id) }
+                // Save last used account & category for MRU order
+                UserPreferences.recordUsedAccount(context, selectedAccountId)
+                matchedCategory?.let { UserPreferences.recordUsedCategory(context, resolvedType, it.id) }
 
                 onSavePaymentTransaction(finalTx, markSettled, loan.id)
                 activePaymentLoan = null
@@ -896,9 +896,9 @@ fun RecordLoanPaymentDialog(
     onConfirm: (amount: Double, accountId: Long, note: String, timestamp: Long, markSettled: Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    val lastUsedAccountId = remember { UserPreferences.getLastUsedAccountId(context) }
-    val sortedAccounts = remember(accounts, lastUsedAccountId) {
-        UserPreferences.sortAccountsWithLastUsedFirst(accounts, lastUsedAccountId)
+    val recentAccountIds = remember { UserPreferences.getRecentAccountIds(context) }
+    val sortedAccounts = remember(accounts, recentAccountIds) {
+        UserPreferences.sortAccountsByRecency(accounts, recentAccountIds)
     }
 
     var selectedAccountId by remember {
@@ -1077,7 +1077,7 @@ fun RecordLoanPaymentDialog(
                                     Icon(IconUtils.getIcon(acc.iconName), contentDescription = null, modifier = Modifier.size(18.dp))
                                 },
                                 text = {
-                                    val isLastUsed = acc.id == lastUsedAccountId
+                                    val isLastUsed = acc.id == recentAccountIds.firstOrNull()
                                     Text("${acc.name} (${DateUtils.formatCurrency(acc.balance, acc.currency)})${if (isLastUsed) " • Last Used" else ""}")
                                 },
                                 onClick = {

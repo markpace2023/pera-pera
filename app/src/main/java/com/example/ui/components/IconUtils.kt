@@ -4,9 +4,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CardGiftcard
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.FamilyRestroom
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Flight
 import androidx.compose.material.icons.filled.Handshake
@@ -19,6 +21,8 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.School
@@ -27,6 +31,8 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.TwoWheeler
+import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material.icons.filled.Work
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -59,9 +65,14 @@ object IconUtils {
         IconEntry("shopping_cart", "Groceries", Icons.Default.ShoppingCart),
         IconEntry("shopping_bag", "Shopping", Icons.Default.ShoppingBag),
         IconEntry("directions_car", "Transportation", Icons.Default.DirectionsCar),
+        IconEntry("motorcycle", "Motorcycle", Icons.Default.TwoWheeler),
         IconEntry("local_gas_station", "Fuel", Icons.Default.LocalGasStation),
         IconEntry("receipt_long", "Bills & Utilities", Icons.Default.ReceiptLong),
-        IconEntry("home", "Housing / Rent", Icons.Default.Home),
+        IconEntry("telephone", "Telephone / Mobile", Icons.Default.Phone),
+        IconEntry("home", "Home / Housing", Icons.Default.Home),
+        IconEntry("tools", "Tools / Hardware", Icons.Default.Build),
+        IconEntry("family", "Family", Icons.Default.FamilyRestroom),
+        IconEntry("grants", "Grants / Funding", Icons.Default.VolunteerActivism),
         IconEntry("movie", "Entertainment", Icons.Default.Movie),
         IconEntry("medical_services", "Health & Medical", Icons.Default.MedicalServices),
         IconEntry("subscriptions", "Subscriptions", Icons.Default.Subscriptions),
@@ -74,13 +85,24 @@ object IconUtils {
         IconEntry("fitness_center", "Fitness / Gym", Icons.Default.FitnessCenter),
         IconEntry("pets", "Pets", Icons.Default.Pets),
         IconEntry("handshake", "Loan / Debt / Lending", Icons.Default.Handshake),
+        IconEntry("other_expenses", "Other Expenses", Icons.Default.Receipt),
         IconEntry("more_horiz", "Other", Icons.Default.MoreHoriz)
     )
 
     private val iconMap: Map<String, ImageVector> = availableIcons.associate { it.key to it.icon }
 
     fun getIcon(name: String?): ImageVector {
-        return iconMap[name] ?: Icons.Default.CreditCard
+        val key = name?.lowercase()?.trim() ?: ""
+        return iconMap[key] ?: when (key) {
+            "family", "family_restroom", "people" -> Icons.Default.FamilyRestroom
+            "grants", "grant", "volunteer_activism", "aid", "scholarship" -> Icons.Default.VolunteerActivism
+            "home", "house", "housing" -> Icons.Default.Home
+            "motorcycle", "two_wheeler", "motor", "scooter", "bike" -> Icons.Default.TwoWheeler
+            "other_expenses", "other", "receipt", "more_horiz" -> Icons.Default.Receipt
+            "telephone", "phone", "call", "mobile", "telco" -> Icons.Default.Phone
+            "tools", "tool", "build", "handyman", "hardware" -> Icons.Default.Build
+            else -> iconMap[key] ?: Icons.Default.CreditCard
+        }
     }
 
     fun suggestIconForAccount(name: String, typeString: String): String {
@@ -93,6 +115,25 @@ object IconUtils {
             lowerName.contains("invest") || lowerName.contains("stock") || lowerName.contains("crypto") -> "trending_up"
             lowerName.contains("savings") || lowerName.contains("bank") || lowerName.contains("bdo") || lowerName.contains("bpi") || lowerName.contains("unionbank") -> "account_balance"
             else -> "account_balance"
+        }
+    }
+
+    fun suggestIconForCategory(name: String): String {
+        val lower = name.lowercase().trim()
+        return when {
+            lower.contains("motor") || lower.contains("scooter") || lower.contains("bike") || lower.contains("angkas") || lower.contains("joyride") -> "motorcycle"
+            lower.contains("phone") || lower.contains("tele") || lower.contains("mobile") || lower.contains("load") || lower.contains("call") -> "telephone"
+            lower.contains("tool") || lower.contains("hardware") || lower.contains("repair") || lower.contains("build") || lower.contains("fix") -> "tools"
+            lower.contains("family") || lower.contains("child") || lower.contains("baby") || lower.contains("parent") || lower.contains("kid") -> "family"
+            lower.contains("grant") || lower.contains("scholarship") || lower.contains("stipend") || lower.contains("subsidy") || lower.contains("aid") -> "grants"
+            lower.contains("home") || lower.contains("house") || lower.contains("furniture") || lower.contains("rent") || lower.contains("condo") -> "home"
+            lower.contains("food") || lower.contains("dining") || lower.contains("restaurant") || lower.contains("eat") || lower.contains("cafe") -> "restaurant"
+            lower.contains("grocery") || lower.contains("market") -> "shopping_cart"
+            lower.contains("car") || lower.contains("transport") || lower.contains("taxi") || lower.contains("ride") -> "directions_car"
+            lower.contains("gas") || lower.contains("fuel") -> "local_gas_station"
+            lower.contains("bill") || lower.contains("utility") || lower.contains("electric") || lower.contains("water") -> "receipt_long"
+            lower.contains("other") || lower.contains("misc") -> "other_expenses"
+            else -> "shopping_bag"
         }
     }
 

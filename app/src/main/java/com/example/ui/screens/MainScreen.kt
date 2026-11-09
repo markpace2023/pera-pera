@@ -456,6 +456,12 @@ fun MainScreen(
                         onSaveCategory = { cat ->
                             coroutineScope.launch { repository.saveCategory(cat) }
                         },
+                        onSaveCategoryAsync = { cat ->
+                            val newId = repository.saveCategory(cat)
+                            QuickTransactionWidgetProvider.notifyUpdate(app)
+                            snackbarHostState.showSnackbar("Category \"${cat.name}\" created")
+                            newId
+                        },
                         onDeleteCategory = { cat, targetCatId ->
                             coroutineScope.launch {
                                 val movedCount = repository.deleteCategory(cat, targetCatId)
@@ -574,6 +580,7 @@ fun MainScreen(
         QuickAddTransactionSheet(
             accounts = accounts,
             categories = categories,
+            recentTransactions = transactions,
             initialAccountId = quickAddInitialAccountId,
             initialType = quickAddInitialType,
             initialAmount = quickAddInitialAmount,
@@ -626,6 +633,7 @@ private fun ScreenContentWithTransition(
     onSaveAccount: (Account) -> Unit,
     onDeleteAccount: (Account) -> Unit,
     onSaveCategory: (Category) -> Unit,
+    onSaveCategoryAsync: (suspend (Category) -> Long)? = null,
     onDeleteCategory: (Category, Long?) -> Unit,
     onSaveBudget: (Budget) -> Unit,
     onOpenAddTransactionSheet: (
@@ -715,6 +723,7 @@ private fun ScreenContentWithTransition(
             onSaveAccount = onSaveAccount,
             onDeleteAccount = onDeleteAccount,
             onSaveCategory = onSaveCategory,
+            onSaveCategoryAsync = onSaveCategoryAsync,
             onDeleteCategory = onDeleteCategory,
             onSaveBudget = onSaveBudget,
             onOpenAddTransactionSheet = onOpenAddTransactionSheet,
@@ -761,6 +770,7 @@ private fun ContentArea(
     onSaveAccount: (Account) -> Unit,
     onDeleteAccount: (Account) -> Unit,
     onSaveCategory: (Category) -> Unit,
+    onSaveCategoryAsync: (suspend (Category) -> Long)? = null,
     onDeleteCategory: (Category, Long?) -> Unit,
     onSaveBudget: (Budget) -> Unit,
     onOpenAddTransactionSheet: (
@@ -860,7 +870,8 @@ private fun ContentArea(
                 coroutineScope.launch {
                     onRefreshExchangeRates()
                 }
-            }
+            },
+            onSaveCategory = onSaveCategoryAsync
         )
         ScreenTab.ACCOUNTS -> AccountsScreen(
             accounts = accounts,

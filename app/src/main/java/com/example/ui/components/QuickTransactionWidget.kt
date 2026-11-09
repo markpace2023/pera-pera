@@ -17,10 +17,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Remove
@@ -33,7 +35,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
+import com.example.data.model.TransactionWithDetails
 import com.example.util.AiCategoryService
+import com.example.util.CategoryMatchingService
+import com.example.util.CategoryMatchResult
 import com.example.util.UserPreferences
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Button
@@ -69,10 +74,12 @@ import com.example.data.model.TransactionType
 import com.example.util.CurrencyUtils
 import com.example.util.DateUtils
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun QuickTransactionWidget(
     accounts: List<Account>,
     categories: List<Category>,
+    recentTransactions: List<TransactionWithDetails> = emptyList(),
     onSaveQuickTransaction: (Transaction) -> Unit,
     onOpenFullSheet: (
         selectedAccountId: Long?,
@@ -82,6 +89,7 @@ fun QuickTransactionWidget(
         categoryId: Long?
     ) -> Unit,
     isPrivacyMode: Boolean = false,
+    onSaveCategory: (suspend (Category) -> Long)? = null,
     modifier: Modifier = Modifier
 ) {
     if (accounts.isEmpty()) return
@@ -89,13 +97,13 @@ fun QuickTransactionWidget(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    val lastUsedAccountId = remember { UserPreferences.getLastUsedAccountId(context) }
-    val sortedAccounts = remember(accounts, lastUsedAccountId) {
-        UserPreferences.sortAccountsWithLastUsedFirst(accounts, lastUsedAccountId)
+    var recentAccountIds by remember { mutableStateOf(UserPreferences.getRecentAccountIds(context)) }
+    val sortedAccounts = remember(accounts, recentAccountIds) {
+        UserPreferences.sortAccountsByRecency(accounts, recentAccountIds)
     }
 
     var selectedAccountId by remember(accounts) {
-        mutableStateOf(lastUsedAccountId ?: sortedAccounts.firstOrNull()?.id ?: 0L)
+        mutableStateOf(recentAccountIds.firstOrNull { id -> accounts.any { it.id == id } } ?: sortedAccounts.firstOrNull()?.id ?: 0L)
     }
     var selectedType by remember { mutableStateOf(TransactionType.EXPENSE) }
     var amountValue by remember { mutableStateOf(TextFieldValue("")) }
@@ -105,13 +113,19 @@ fun QuickTransactionWidget(
     var selectedCategoryId by remember(selectedType) {
         mutableStateOf<Long?>(null)
     }
-    var isAiMatching by remember { mutableStateOf(false) }
     var showCategoryPrompt by remember { mutableStateOf(false) }
+    var multipleMatchCategories by remember { mutableStateOf<List<Category>>(emptyList()) }
 
-    val lastUsedCategoryId = remember(selectedType) { UserPreferences.getLastUsedCategoryId(context, selectedType) }
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var categoryDialogInitialName by remember { mutableStateOf("") }
+    var categoryDialogInitialIcon by remember { mutableStateOf("shopping_cart") }
+    var categoryDialogInitialColor by remember { mutableStateOf("#10B981") }
+    var shouldRecordAfterCategoryCreated by remember { mutableStateOf(false) }
+
+    var recentCategoryIds by remember(selectedType) { mutableStateOf(UserPreferences.getRecentCategoryIds(context, selectedType)) }
     val availableCategories = remember(categories, selectedType) { categories.filter { it.type == selectedType } }
-    val sortedCategories = remember(availableCategories, lastUsedCategoryId) {
-        UserPreferences.sortCategoriesWithLastUsedFirst(availableCategories, lastUsedCategoryId)
+    val sortedCategories = remember(availableCategories, recentCategoryIds) {
+        UserPreferences.sortCategoriesByRecency(availableCategories, recentCategoryIds)
     }
 
     val selectedAccount = accounts.find { it.id == selectedAccountId } ?: sortedAccounts.first()
@@ -222,7 +236,7 @@ fun QuickTransactionWidget(
                     }
 
                     // Transfer icon button
-                    Box(
+                    /* Box(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
@@ -239,7 +253,7 @@ fun QuickTransactionWidget(
                             tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(20.dp)
                         )
-                    }
+                    } */
                 }
             }
 
@@ -253,7 +267,7 @@ fun QuickTransactionWidget(
             ) {
                 sortedAccounts.forEach { acc ->
                     val isAccSelected = acc.id == selectedAccountId
-                    val isLastUsed = acc.id == lastUsedAccountId
+                    val isLastUsed = acc.id == recentAccountIds.firstOrNull()
                     FilterChip(
                         selected = isAccSelected,
                         onClick = { selectedAccountId = acc.id },
@@ -294,35 +308,41 @@ fun QuickTransactionWidget(
                 OutlinedTextField(
                     value = titleText,
                     onValueChange = { titleText = it },
-                    label = { Text("Note / Title") },
+                    label = { Text("Note") },
                     placeholder = { Text(if (selectedType == TransactionType.EXPENSE) "e.g. Lunch" else "e.g. Salary") },
                     trailingIcon = {
                         IconButton(
                             onClick = {
                                 if (titleText.isNotBlank()) {
-                                    coroutineScope.launch {
-                                        isAiMatching = true
-                                        val match = AiCategoryService.suggestCategory(context, titleText, selectedType, categories)
-                                        isAiMatching = false
-                                        if (match != null) {
-                                            selectedCategoryId = match.category.id
+                                    val matchResult = CategoryMatchingService.matchCategoryWithDetails(
+                                        noteOrTitle = titleText,
+                                        type = selectedType,
+                                        availableCategories = categories,
+                                        recentTransactions = recentTransactions
+                                    )
+                                    when (matchResult) {
+                                        is CategoryMatchResult.SingleMatch -> {
+                                            selectedCategoryId = matchResult.category.id
+                                            multipleMatchCategories = emptyList()
+                                        }
+                                        is CategoryMatchResult.MultipleMatches -> {
+                                            multipleMatchCategories = matchResult.matchedCategories
+                                        }
+                                        is CategoryMatchResult.NoMatch -> {
+                                            showCategoryPrompt = true
                                         }
                                     }
                                 }
                             },
-                            enabled = !isAiMatching && titleText.isNotBlank(),
+                            enabled = titleText.isNotBlank(),
                             modifier = Modifier.testTag("quick_ai_categorize_btn")
                         ) {
-                            if (isAiMatching) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = "AI Auto-Categorize",
-                                    tint = if (titleText.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.Category,
+                                contentDescription = "Auto-Categorize",
+                                tint = if (titleText.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     },
                     singleLine = true,
@@ -341,9 +361,33 @@ fun QuickTransactionWidget(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    FilterChip(
+                        selected = false,
+                        onClick = {
+                            val candidateName = titleText.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                            if (onSaveCategory != null) {
+                                categoryDialogInitialName = candidateName
+                                categoryDialogInitialIcon = IconUtils.suggestIconForCategory(candidateName)
+                                categoryDialogInitialColor = "#10B981"
+                                shouldRecordAfterCategoryCreated = false
+                                showAddCategoryDialog = true
+                            } else {
+                                onOpenFullSheet(selectedAccountId, selectedType, amountValue.text, titleText, null)
+                            }
+                        },
+                        label = { Text("New", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        modifier = Modifier.testTag("quick_add_category_chip")
+                    )
+
                     sortedCategories.take(8).forEach { cat ->
                         val isCatSelected = cat.id == selectedCategoryId
-                        val isLastUsed = cat.id == lastUsedCategoryId
+                        val isLastUsed = cat.id == recentCategoryIds.firstOrNull()
                         FilterChip(
                             selected = isCatSelected,
                             onClick = { selectedCategoryId = if (isCatSelected) null else cat.id },
@@ -411,39 +455,53 @@ fun QuickTransactionWidget(
                                     title = defaultTitle,
                                     timestamp = System.currentTimeMillis()
                                 )
-                                UserPreferences.setLastUsedAccountId(context, selectedAccountId)
-                                UserPreferences.setLastUsedCategoryId(context, selectedType, selectedCategoryId!!)
+                                UserPreferences.recordUsedAccount(context, selectedAccountId)
+                                UserPreferences.recordUsedCategory(context, selectedType, selectedCategoryId!!)
+                                recentAccountIds = UserPreferences.getRecentAccountIds(context)
+                                recentCategoryIds = UserPreferences.getRecentCategoryIds(context, selectedType)
+                                selectedAccountId = recentAccountIds.firstOrNull { id -> accounts.any { it.id == id } } ?: selectedAccountId
                                 onSaveQuickTransaction(tx)
                                 amountValue = TextFieldValue("")
                                 titleText = ""
                                 selectedCategoryId = null
                             } else {
-                                // User forgot to select category: AI auto-categorizes
-                                coroutineScope.launch {
-                                    isAiMatching = true
-                                    val match = if (titleText.isNotBlank()) {
-                                        AiCategoryService.suggestCategory(context, titleText, selectedType, categories)
-                                    } else null
-                                    isAiMatching = false
+                                // Category not manually selected yet: match via recent transaction or keywords
+                                val matchResult = if (titleText.isNotBlank()) {
+                                    CategoryMatchingService.matchCategoryWithDetails(
+                                        noteOrTitle = titleText,
+                                        type = selectedType,
+                                        availableCategories = categories,
+                                        recentTransactions = recentTransactions
+                                    )
+                                } else CategoryMatchResult.NoMatch
 
-                                    if (match != null) {
-                                        val defaultTitle = if (titleText.isNotBlank()) titleText else match.category.name
+                                when (matchResult) {
+                                    is CategoryMatchResult.SingleMatch -> {
+                                        val defaultTitle = if (titleText.isNotBlank()) titleText else matchResult.category.name
                                         val tx = Transaction(
                                             type = selectedType,
                                             amount = amount,
                                             accountId = selectedAccountId,
-                                            categoryId = match.category.id,
+                                            categoryId = matchResult.category.id,
                                             title = defaultTitle,
                                             timestamp = System.currentTimeMillis()
                                         )
-                                        UserPreferences.setLastUsedAccountId(context, selectedAccountId)
-                                        UserPreferences.setLastUsedCategoryId(context, selectedType, match.category.id)
+                                        UserPreferences.recordUsedAccount(context, selectedAccountId)
+                                        UserPreferences.recordUsedCategory(context, selectedType, matchResult.category.id)
+                                        recentAccountIds = UserPreferences.getRecentAccountIds(context)
+                                        recentCategoryIds = UserPreferences.getRecentCategoryIds(context, selectedType)
+                                        selectedAccountId = recentAccountIds.firstOrNull { id -> accounts.any { it.id == id } } ?: selectedAccountId
                                         onSaveQuickTransaction(tx)
                                         amountValue = TextFieldValue("")
                                         titleText = ""
                                         selectedCategoryId = null
-                                    } else {
-                                        // No category inferred: prompt user to choose category
+                                    }
+                                    is CategoryMatchResult.MultipleMatches -> {
+                                        // Multiple categories match: prompt the user to choose
+                                        multipleMatchCategories = matchResult.matchedCategories
+                                    }
+                                    is CategoryMatchResult.NoMatch -> {
+                                        // No category matched: prompt user to choose or create
                                         showCategoryPrompt = true
                                     }
                                 }
@@ -456,22 +514,112 @@ fun QuickTransactionWidget(
                     ),
                     modifier = Modifier.testTag("quick_save_button")
                 ) {
-                    if (isAiMatching) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("AI...", style = MaterialTheme.typography.labelSmall)
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Record")
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Record")
                 }
             }
         }
+    }
+
+    if (multipleMatchCategories.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { multipleMatchCategories = emptyList() },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Category,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Choose Category", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = if (titleText.isNotBlank()) {
+                            "Multiple categories match \"$titleText\". Please choose the correct one:"
+                        } else {
+                            "Multiple categories match. Please choose the correct one:"
+                        },
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        multipleMatchCategories.forEach { cat ->
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    val chosenCat = cat
+                                    multipleMatchCategories = emptyList()
+                                    val amount = CurrencyUtils.parseCurrencyInput(amountValue)
+                                    if (amount > 0) {
+                                        val defaultTitle = if (titleText.isNotBlank()) titleText else chosenCat.name
+                                        val tx = Transaction(
+                                            type = selectedType,
+                                            amount = amount,
+                                            accountId = selectedAccountId,
+                                            categoryId = chosenCat.id,
+                                            title = defaultTitle,
+                                            timestamp = System.currentTimeMillis()
+                                        )
+                                        UserPreferences.recordUsedAccount(context, selectedAccountId)
+                                        UserPreferences.recordUsedCategory(context, selectedType, chosenCat.id)
+                                        recentAccountIds = UserPreferences.getRecentAccountIds(context)
+                                        recentCategoryIds = UserPreferences.getRecentCategoryIds(context, selectedType)
+                                        selectedAccountId = recentAccountIds.firstOrNull { id -> accounts.any { it.id == id } } ?: selectedAccountId
+                                        onSaveQuickTransaction(tx)
+                                        amountValue = TextFieldValue("")
+                                        titleText = ""
+                                        selectedCategoryId = null
+                                    } else {
+                                        selectedCategoryId = chosenCat.id
+                                    }
+                                },
+                                label = { Text(cat.name, style = MaterialTheme.typography.labelSmall) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = IconUtils.getIcon(cat.iconName),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                                modifier = Modifier.testTag("quick_multiple_match_cat_${cat.id}")
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        multipleMatchCategories = emptyList()
+                        showCategoryPrompt = true
+                    }
+                ) {
+                    Text("Show All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { multipleMatchCategories = emptyList() }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showCategoryPrompt) {
@@ -480,7 +628,7 @@ fun QuickTransactionWidget(
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.AutoAwesome,
+                        imageVector = Icons.Default.Category,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
@@ -490,17 +638,80 @@ fun QuickTransactionWidget(
                 }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "AI couldn't infer a category. Please choose an appropriate category for this ${selectedType.label.lowercase()}:",
+                        text = "Please choose an existing category or create a new one:",
                         style = MaterialTheme.typography.bodyMedium
                     )
+
+                    // Button to add new category
+                    Button(
+                        onClick = {
+                            val candidateName = titleText.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                            if (onSaveCategory != null) {
+                                categoryDialogInitialName = candidateName
+                                categoryDialogInitialIcon = IconUtils.suggestIconForCategory(candidateName)
+                                categoryDialogInitialColor = "#10B981"
+                                shouldRecordAfterCategoryCreated = true
+                                showCategoryPrompt = false
+                                showAddCategoryDialog = true
+                            } else {
+                                showCategoryPrompt = false
+                                onOpenFullSheet(selectedAccountId, selectedType, amountValue.text, titleText, null)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("quick_prompt_create_category_btn")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            if (titleText.isNotBlank()) "Add \"${titleText.trim()}\" as New Category & Record" else "+ Create New Category & Record",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = "Or choose an existing category:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                val candidateName = titleText.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                                if (onSaveCategory != null) {
+                                    categoryDialogInitialName = candidateName
+                                    categoryDialogInitialIcon = IconUtils.suggestIconForCategory(candidateName)
+                                    categoryDialogInitialColor = "#10B981"
+                                    shouldRecordAfterCategoryCreated = true
+                                    showCategoryPrompt = false
+                                    showAddCategoryDialog = true
+                                } else {
+                                    showCategoryPrompt = false
+                                    onOpenFullSheet(selectedAccountId, selectedType, amountValue.text, titleText, null)
+                                }
+                            },
+                            label = { Text("New Category", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            ),
+                            modifier = Modifier.testTag("quick_prompt_add_new_category_chip")
+                        )
+
                         sortedCategories.forEach { cat ->
                             FilterChip(
                                 selected = false,
@@ -515,8 +726,11 @@ fun QuickTransactionWidget(
                                         title = defaultTitle,
                                         timestamp = System.currentTimeMillis()
                                     )
-                                    UserPreferences.setLastUsedAccountId(context, selectedAccountId)
-                                    UserPreferences.setLastUsedCategoryId(context, selectedType, cat.id)
+                                    UserPreferences.recordUsedAccount(context, selectedAccountId)
+                                    UserPreferences.recordUsedCategory(context, selectedType, cat.id)
+                                    recentAccountIds = UserPreferences.getRecentAccountIds(context)
+                                    recentCategoryIds = UserPreferences.getRecentCategoryIds(context, selectedType)
+                                    selectedAccountId = recentAccountIds.firstOrNull { id -> accounts.any { it.id == id } } ?: selectedAccountId
                                     showCategoryPrompt = false
                                     onSaveQuickTransaction(tx)
                                     amountValue = TextFieldValue("")
@@ -530,7 +744,8 @@ fun QuickTransactionWidget(
                                         contentDescription = null,
                                         modifier = Modifier.size(14.dp)
                                     )
-                                }
+                                },
+                                modifier = Modifier.testTag("quick_prompt_cat_chip_${cat.id}")
                             )
                         }
                     }
@@ -543,6 +758,52 @@ fun QuickTransactionWidget(
                 ) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    if (showAddCategoryDialog) {
+        CategoryAddDialog(
+            defaultType = selectedType,
+            initialName = categoryDialogInitialName,
+            initialIconKey = categoryDialogInitialIcon,
+            initialColorHex = categoryDialogInitialColor,
+            onSave = { newCat ->
+                coroutineScope.launch {
+                    val newId = onSaveCategory?.invoke(newCat)
+                    showAddCategoryDialog = false
+                    if (newId != null) {
+                        selectedCategoryId = newId
+                        if (shouldRecordAfterCategoryCreated) {
+                            shouldRecordAfterCategoryCreated = false
+                            val amount = CurrencyUtils.parseCurrencyInput(amountValue)
+                            if (amount > 0) {
+                                val defaultTitle = if (titleText.isNotBlank()) titleText else newCat.name
+                                val tx = Transaction(
+                                    type = selectedType,
+                                    amount = amount,
+                                    accountId = selectedAccountId,
+                                    categoryId = newId,
+                                    title = defaultTitle,
+                                    timestamp = System.currentTimeMillis()
+                                )
+                                UserPreferences.recordUsedAccount(context, selectedAccountId)
+                                UserPreferences.recordUsedCategory(context, selectedType, newId)
+                                recentAccountIds = UserPreferences.getRecentAccountIds(context)
+                                recentCategoryIds = UserPreferences.getRecentCategoryIds(context, selectedType)
+                                selectedAccountId = recentAccountIds.firstOrNull { id -> accounts.any { it.id == id } } ?: selectedAccountId
+                                onSaveQuickTransaction(tx)
+                                amountValue = TextFieldValue("")
+                                titleText = ""
+                                selectedCategoryId = null
+                            }
+                        }
+                    }
+                }
+            },
+            onDismiss = {
+                showAddCategoryDialog = false
+                shouldRecordAfterCategoryCreated = false
             }
         )
     }

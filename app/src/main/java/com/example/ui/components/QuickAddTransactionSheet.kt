@@ -82,6 +82,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.Category
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -90,7 +92,10 @@ import com.example.data.model.Category
 import com.example.data.model.RecurringFrequency
 import com.example.data.model.Transaction
 import com.example.data.model.TransactionType
+import com.example.data.model.TransactionWithDetails
 import com.example.util.AiCategoryService
+import com.example.util.CategoryMatchingService
+import com.example.util.CategoryMatchResult
 import com.example.util.CurrencyUtils
 import com.example.util.DateUtils
 import com.example.util.LoanUtils
@@ -98,11 +103,12 @@ import com.example.util.NotificationHelper
 import com.example.util.UserPreferences
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun QuickAddTransactionSheet(
     accounts: List<Account>,
     categories: List<Category>,
+    recentTransactions: List<TransactionWithDetails> = emptyList(),
     initialAccountId: Long? = null,
     initialType: TransactionType = TransactionType.EXPENSE,
     initialAmount: String = "",
@@ -122,17 +128,19 @@ fun QuickAddTransactionSheet(
 
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     var showCategoryRequiredPrompt by remember { mutableStateOf(false) }
+    var multipleMatchCategories by remember { mutableStateOf<List<Category>>(emptyList()) }
 
     var type by remember { mutableStateOf(initialType) }
 
-    val lastUsedAccountId = remember { UserPreferences.getLastUsedAccountId(context) }
-    val sortedAccounts = remember(accounts, lastUsedAccountId) {
-        UserPreferences.sortAccountsWithLastUsedFirst(accounts, lastUsedAccountId)
+    var recentAccountIds by remember { mutableStateOf(UserPreferences.getRecentAccountIds(context)) }
+    val sortedAccounts = remember(accounts, recentAccountIds) {
+        UserPreferences.sortAccountsByRecency(accounts, recentAccountIds)
     }
 
     var selectedAccountId by remember {
-        mutableLongStateOf(initialAccountId ?: lastUsedAccountId ?: sortedAccounts.firstOrNull()?.id ?: 0L)
+        mutableLongStateOf(initialAccountId ?: recentAccountIds.firstOrNull { id -> accounts.any { it.id == id } } ?: sortedAccounts.firstOrNull()?.id ?: 0L)
     }
+    var recentCategoryIds by remember(type) { mutableStateOf(UserPreferences.getRecentCategoryIds(context, type)) }
     var targetAccountId by remember {
         val remaining = sortedAccounts.filter { it.id != selectedAccountId }
         mutableLongStateOf(remaining.firstOrNull()?.id ?: 0L)
@@ -185,30 +193,39 @@ fun QuickAddTransactionSheet(
     val targetAccount = accounts.find { it.id == targetAccountId }
 
     fun runAiCategorize() {
-        val query = noteText.ifBlank { titleText }
+        val query = noteText.ifBlank { titleText }.trim()
         if (query.isBlank()) {
             aiSuggestionBanner = "Enter a title or note to auto-categorize"
             return
         }
-        coroutineScope.launch {
-            isAiCategorizing = true
-            aiSuggestionBanner = null
-            aiSuggestedNewCategory = null
-            val result = AiCategoryService.categorizeOrSuggestNew(context, query, type, categories)
-            isAiCategorizing = false
-            when (result) {
-                is CategorizationResult.MatchedExisting -> {
-                    selectedCategoryId = result.suggestion.category.id
-                    aiSuggestionBanner = "✨ ${result.suggestion.message}"
-                    aiSuggestedNewCategory = null
-                }
-                is CategorizationResult.SuggestedNew -> {
-                    aiSuggestedNewCategory = result.newCategory
-                    aiSuggestionBanner = "✨ Suggested New Category: \"${result.newCategory.name}\""
-                }
-                is CategorizationResult.None -> {
+        val matchResult = CategoryMatchingService.matchCategoryWithDetails(
+            noteOrTitle = query,
+            type = type,
+            availableCategories = categories,
+            recentTransactions = recentTransactions
+        )
+        when (matchResult) {
+            is CategoryMatchResult.SingleMatch -> {
+                selectedCategoryId = matchResult.category.id
+                aiSuggestionBanner = "✨ ${matchResult.reason}"
+                aiSuggestedNewCategory = null
+                multipleMatchCategories = emptyList()
+            }
+            is CategoryMatchResult.MultipleMatches -> {
+                multipleMatchCategories = matchResult.matchedCategories
+                aiSuggestionBanner = "Multiple categories match \"$query\". Please choose below."
+                aiSuggestedNewCategory = null
+            }
+            is CategoryMatchResult.NoMatch -> {
+                val offlineNew = AiCategoryService.suggestNewCategoryOffline(query, type, categories)
+                if (offlineNew != null) {
+                    aiSuggestedNewCategory = offlineNew
+                    aiSuggestionBanner = "✨ Suggested New Category: \"${offlineNew.name}\""
+                    multipleMatchCategories = emptyList()
+                } else {
                     aiSuggestionBanner = "No matching category found for \"$query\""
                     aiSuggestedNewCategory = null
+                    multipleMatchCategories = emptyList()
                 }
             }
         }
@@ -261,11 +278,13 @@ fun QuickAddTransactionSheet(
             isLoanSettled = false
         )
 
-        // Save preferences: last used account & category
-        UserPreferences.setLastUsedAccountId(context, selectedAccountId)
+        // Save preferences: record used account & category for MRU order
+        UserPreferences.recordUsedAccount(context, selectedAccountId)
         if (catId != null) {
-            UserPreferences.setLastUsedCategoryId(context, type, catId)
+            UserPreferences.recordUsedCategory(context, type, catId)
         }
+        recentAccountIds = UserPreferences.getRecentAccountIds(context)
+        recentCategoryIds = UserPreferences.getRecentCategoryIds(context, type)
 
         // Trigger loan notification alert if enabled
         if (isLoanFinal && enableLoanReminder && loanDueDate != null && notificationHelper != null) {
@@ -483,7 +502,7 @@ fun QuickAddTransactionSheet(
                             onDismissRequest = { isAccountDropdownOpen = false }
                         ) {
                             sortedAccounts.forEach { acc ->
-                                val isLastUsed = acc.id == lastUsedAccountId
+                                val isLastUsed = acc.id == recentAccountIds.firstOrNull()
                                 val balanceText = if (isPrivacyMode) "" else " (${DateUtils.formatCurrency(acc.balance, acc.currency)})"
                                 DropdownMenuItem(
                                     text = { Text("${acc.name}$balanceText${if (isLastUsed) " • Last Used" else ""}") },
@@ -576,7 +595,7 @@ fun QuickAddTransactionSheet(
                         onDismissRequest = { isAccountDropdownOpen = false }
                     ) {
                         sortedAccounts.forEach { acc ->
-                            val isLastUsed = acc.id == lastUsedAccountId
+                            val isLastUsed = acc.id == recentAccountIds.firstOrNull()
                             val balanceText = if (isPrivacyMode) "" else " (${DateUtils.formatCurrency(acc.balance, acc.currency)})"
                             DropdownMenuItem(
                                 leadingIcon = {
@@ -607,26 +626,19 @@ fun QuickAddTransactionSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    // AI Auto-Categorize Button
+                    // Auto-Categorize Button
                     TextButton(
                         onClick = { runAiCategorize() },
-                        enabled = !isAiCategorizing,
                         modifier = Modifier.testTag("ai_categorize_button")
                     ) {
-                        if (isAiCategorizing) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("AI Matching...", style = MaterialTheme.typography.labelSmall)
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("AI Auto-Assign", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Auto-Categorize", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -740,10 +752,9 @@ fun QuickAddTransactionSheet(
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
-                val lastUsedCategoryId = remember(type) { UserPreferences.getLastUsedCategoryId(context, type) }
                 val availableCats = remember(type, categories) { categories.filter { it.type == type } }
-                val sortedCategories = remember(availableCats, lastUsedCategoryId) {
-                    UserPreferences.sortCategoriesWithLastUsedFirst(availableCats, lastUsedCategoryId)
+                val sortedCategories = remember(availableCats, recentCategoryIds) {
+                    UserPreferences.sortCategoriesByRecency(availableCats, recentCategoryIds)
                 }
                 Row(
                     modifier = Modifier
@@ -751,9 +762,30 @@ fun QuickAddTransactionSheet(
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    if (onSaveCategory != null) {
+                        FilterChip(
+                            selected = false,
+                            onClick = {
+                                categoryDialogInitialName = ""
+                                categoryDialogInitialIcon = "shopping_cart"
+                                categoryDialogInitialColor = "#10B981"
+                                shouldRecordAfterCategoryCreated = false
+                                showAddCategoryDialog = true
+                            },
+                            label = { Text("New Category") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                            modifier = Modifier.testTag("sheet_add_new_category_chip")
+                        )
+                    }
+
                     sortedCategories.forEach { cat ->
                         val isSelected = cat.id == selectedCategoryId
-                        val isLastUsed = cat.id == lastUsedCategoryId
+                        val isLastUsed = cat.id == recentCategoryIds.firstOrNull()
                         FilterChip(
                             selected = isSelected,
                             onClick = { selectedCategoryId = if (isSelected) null else cat.id },
@@ -769,24 +801,6 @@ fun QuickAddTransactionSheet(
                                 selectedContainerColor = MaterialTheme.colorScheme.primaryContainer
                             ),
                             modifier = Modifier.testTag("sheet_cat_${cat.id}")
-                        )
-                    }
-
-                    if (onSaveCategory != null) {
-                        FilterChip(
-                            selected = false,
-                            onClick = {
-                                categoryDialogInitialName = ""
-                                categoryDialogInitialIcon = "shopping_cart"
-                                categoryDialogInitialColor = "#10B981"
-                                shouldRecordAfterCategoryCreated = false
-                                showAddCategoryDialog = true
-                            },
-                            label = { Text("+ New Category") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                            modifier = Modifier.testTag("sheet_add_new_category_chip")
                         )
                     }
                 }
@@ -819,19 +833,14 @@ fun QuickAddTransactionSheet(
                 trailingIcon = {
                     IconButton(
                         onClick = { runAiCategorize() },
-                        enabled = !isAiCategorizing,
                         modifier = Modifier.testTag("note_ai_categorize_btn")
                     ) {
-                        if (isAiCategorizing) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = "AI Auto-Categorize",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Category,
+                            contentDescription = "Auto-Categorize",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 },
                 singleLine = false,
@@ -1301,32 +1310,33 @@ fun QuickAddTransactionSheet(
                         } else if (selectedCategoryId != null) {
                             executeSaveWithCategory(selectedCategoryId)
                         } else {
-                            // User forgot to select category: AI auto-categorizes or suggests new category, else prompt
-                            val query = noteText.ifBlank { titleText }
-                            coroutineScope.launch {
-                                isAiCategorizing = true
-                                aiSuggestionBanner = "AI analyzing transaction..."
-                                val result = if (query.isNotBlank()) {
-                                    AiCategoryService.categorizeOrSuggestNew(context, query, type, categories)
-                                } else CategorizationResult.None
-                                isAiCategorizing = false
-
-                                when (result) {
-                                    is CategorizationResult.MatchedExisting -> {
-                                        selectedCategoryId = result.suggestion.category.id
-                                        aiSuggestionBanner = "✨ ${result.suggestion.message}"
-                                        executeSaveWithCategory(result.suggestion.category.id)
+                            // User forgot to select category: match via recent transaction or keywords, else prompt
+                            val query = noteText.ifBlank { titleText }.trim()
+                            if (query.isNotBlank()) {
+                                val matchResult = CategoryMatchingService.matchCategoryWithDetails(
+                                    noteOrTitle = query,
+                                    type = type,
+                                    availableCategories = categories,
+                                    recentTransactions = recentTransactions
+                                )
+                                when (matchResult) {
+                                    is CategoryMatchResult.SingleMatch -> {
+                                        selectedCategoryId = matchResult.category.id
+                                        executeSaveWithCategory(matchResult.category.id)
                                     }
-                                    is CategorizationResult.SuggestedNew -> {
-                                        aiSuggestedNewCategory = result.newCategory
-                                        aiSuggestionBanner = "✨ Suggested New Category: \"${result.newCategory.name}\""
-                                        showCategoryRequiredPrompt = true
+                                    is CategoryMatchResult.MultipleMatches -> {
+                                        multipleMatchCategories = matchResult.matchedCategories
                                     }
-                                    is CategorizationResult.None -> {
-                                        aiSuggestedNewCategory = null
+                                    is CategoryMatchResult.NoMatch -> {
+                                        val offlineNew = AiCategoryService.suggestNewCategoryOffline(query, type, categories)
+                                        if (offlineNew != null) {
+                                            aiSuggestedNewCategory = offlineNew
+                                        }
                                         showCategoryRequiredPrompt = true
                                     }
                                 }
+                            } else {
+                                showCategoryRequiredPrompt = true
                             }
                         }
                     }
@@ -1412,12 +1422,92 @@ fun QuickAddTransactionSheet(
         )
     }
 
+    if (multipleMatchCategories.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { multipleMatchCategories = emptyList() },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Category,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Choose Category",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            text = {
+                Column {
+                    val query = noteText.ifBlank { titleText }
+                    Text(
+                        text = if (query.isNotBlank()) {
+                            "Multiple categories match \"$query\". Please choose the correct one:"
+                        } else {
+                            "Multiple categories match. Please choose the correct one:"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        multipleMatchCategories.forEach { cat ->
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    val chosenId = cat.id
+                                    multipleMatchCategories = emptyList()
+                                    selectedCategoryId = chosenId
+                                    executeSaveWithCategory(chosenId)
+                                },
+                                label = { Text(cat.name, style = MaterialTheme.typography.labelSmall) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = IconUtils.getIcon(cat.iconName),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                ),
+                                modifier = Modifier.testTag("sheet_multiple_match_cat_${cat.id}")
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        multipleMatchCategories = emptyList()
+                        showCategoryRequiredPrompt = true
+                    }
+                ) {
+                    Text("Show All")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { multipleMatchCategories = emptyList() }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     // Prompt Dialog when User Forgot to Select Category or needs to pick/create category
     if (showCategoryRequiredPrompt) {
-        val promptCategories = remember(type, categories) {
-            val lastUsed = UserPreferences.getLastUsedCategoryId(context, type)
+        val promptCategories = remember(type, categories, recentCategoryIds) {
             val filtered = categories.filter { it.type == type }
-            UserPreferences.sortCategoriesWithLastUsedFirst(filtered, lastUsed)
+            UserPreferences.sortCategoriesByRecency(filtered, recentCategoryIds)
         }
 
         AlertDialog(
@@ -1538,6 +1628,27 @@ fun QuickAddTransactionSheet(
                                 .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            if (onSaveCategory != null) {
+                                FilterChip(
+                                    selected = false,
+                                    onClick = {
+                                        categoryDialogInitialName = if (aiSuggestedNewCategory != null) "" else titleText.trim()
+                                        categoryDialogInitialIcon = "shopping_cart"
+                                        categoryDialogInitialColor = "#10B981"
+                                        shouldRecordAfterCategoryCreated = true
+                                        showCategoryRequiredPrompt = false
+                                        showAddCategoryDialog = true
+                                    },
+                                    label = { Text("New Category", fontWeight = FontWeight.SemiBold) },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                    ),
+                                    modifier = Modifier.testTag("prompt_add_new_category_chip")
+                                )
+                            }
                             promptCategories.forEach { cat ->
                                 FilterChip(
                                     selected = false,
@@ -1641,123 +1752,3 @@ fun QuickAddTransactionSheet(
     }
 }
 
-@Composable
-private fun CategoryAddDialog(
-    defaultType: TransactionType,
-    initialName: String = "",
-    initialIconKey: String = "shopping_cart",
-    initialColorHex: String = "#10B981",
-    onSave: (Category) -> Unit,
-    onDismiss: () -> Unit
-) {
-    var name by remember(initialName) { mutableStateOf(initialName) }
-    var iconKey by remember(initialIconKey) { mutableStateOf(initialIconKey) }
-    var colorHex by remember(initialColorHex) { mutableStateOf(initialColorHex) }
-    var showIconPicker by remember { mutableStateOf(false) }
-
-    val presetColors = listOf(
-        "#10B981", "#3B82F6", "#8B5CF6", "#F59E0B", "#EF4444", "#06B6D4", "#EC4899", "#1E293B"
-    )
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add Category") },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 440.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Category Name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(runCatching { Color(android.graphics.Color.parseColor(colorHex)) }.getOrDefault(MaterialTheme.colorScheme.primary))
-                                .clickable { showIconPicker = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = IconUtils.getIcon(iconKey),
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(onClick = { showIconPicker = true }) {
-                            Text("Choose Icon")
-                        }
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    presetColors.forEach { hex ->
-                        val c = Color(android.graphics.Color.parseColor(hex))
-                        val isSelected = colorHex.equals(hex, ignoreCase = true)
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(c)
-                                .then(
-                                    if (isSelected) Modifier.border(2.5.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier
-                                )
-                                .clickable { colorHex = hex }
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (name.isNotBlank()) {
-                        val cat = Category(
-                            name = name.trim(),
-                            type = defaultType,
-                            iconName = iconKey,
-                            colorHex = colorHex
-                        )
-                        onSave(cat)
-                    }
-                },
-                enabled = name.isNotBlank()
-            ) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-
-    if (showIconPicker) {
-        IconPickerDialog(
-            selectedIconKey = iconKey,
-            onIconSelected = { key ->
-                iconKey = key
-                showIconPicker = false
-            },
-            onDismissRequest = { showIconPicker = false }
-        )
-    }
-}

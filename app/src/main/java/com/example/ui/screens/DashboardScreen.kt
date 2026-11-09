@@ -116,7 +116,8 @@ fun DashboardScreen(
     onTogglePrivacyMode: (() -> Unit)? = null,
     primaryCurrency: String = "PHP",
     exchangeRates: Map<String, Double> = emptyMap(),
-    onRefreshExchangeRates: () -> Unit = {}
+    onRefreshExchangeRates: () -> Unit = {},
+    onSaveCategory: (suspend (Category) -> Long)? = null
 ) {
     var selectedTimeframe by remember { mutableStateOf(DateUtils.Timeframe.MONTHLY) }
     var customStartDate by remember { mutableStateOf(System.currentTimeMillis() - 30L * 24 * 3600 * 1000) }
@@ -626,11 +627,13 @@ fun DashboardScreen(
                     QuickTransactionWidget(
                         accounts = accounts,
                         categories = categories,
+                        recentTransactions = transactions,
                         onSaveQuickTransaction = onSaveTransaction,
                         onOpenFullSheet = { accId, t, amt, title, catId ->
                             onOpenAddTransactionSheet(accId, t, amt, title, catId)
                         },
-                        isPrivacyMode = isPrivacyMode
+                        isPrivacyMode = isPrivacyMode,
+                        onSaveCategory = onSaveCategory
                     )
                 }
             }
@@ -1087,14 +1090,14 @@ fun DashboardScreen(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
-                TextButton(
+                /* TextButton(
                     onClick = { onOpenAddTransactionSheet(null, TransactionType.EXPENSE, "", "", null) },
                     modifier = Modifier.testTag("dashboard_add_tx_btn")
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Add Entry")
-                }
+                } */
             }
         }
 
