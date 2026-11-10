@@ -48,13 +48,27 @@ data class Transaction(
     val deletedToAccountName: String? = null
 )
 
+enum class BudgetGroup(val key: String, val displayName: String, val percentage: Double, val description: String) {
+    NEEDS("NEEDS", "Needs (50%)", 0.50, "Rent, groceries, utilities, transport, essentials"),
+    WANTS("WANTS", "Wants (30%)", 0.30, "Dining out, shopping, entertainment, travel, hobbies"),
+    SAVINGS_DEBT("SAVINGS_DEBT", "Savings & Debt (20%)", 0.20, "Savings transfers, loan & debt payments, emergency fund"),
+    NONE("NONE", "None", 0.0, "Income / not applicable");
+
+    companion object {
+        fun fromKey(key: String?): BudgetGroup {
+            return entries.firstOrNull { it.key.equals(key, ignoreCase = true) || it.name.equals(key, ignoreCase = true) } ?: NEEDS
+        }
+    }
+}
+
 data class Category(
     val id: Long = 0,
     val name: String,
     val type: TransactionType,
     val iconName: String,
     val colorHex: String,
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+    val budgetGroup: BudgetGroup = BudgetGroup.NEEDS
 )
 
 data class Budget(

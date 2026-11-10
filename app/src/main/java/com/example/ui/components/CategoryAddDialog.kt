@@ -43,12 +43,14 @@ fun CategoryAddDialog(
     initialName: String = "",
     initialIconKey: String = "shopping_cart",
     initialColorHex: String = "#10B981",
+    initialBudgetGroup: com.example.data.model.BudgetGroup = com.example.data.model.BudgetGroup.NEEDS,
     onSave: (Category) -> Unit,
     onDismiss: () -> Unit
 ) {
     var name by remember(initialName) { mutableStateOf(initialName) }
     var iconKey by remember(initialIconKey) { mutableStateOf(initialIconKey) }
     var colorHex by remember(initialColorHex) { mutableStateOf(initialColorHex) }
+    var selectedBudgetGroup by remember(initialBudgetGroup) { mutableStateOf(initialBudgetGroup) }
     var showIconPicker by remember { mutableStateOf(false) }
 
     val presetColors = listOf(
@@ -62,7 +64,7 @@ fun CategoryAddDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 440.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -75,6 +77,52 @@ fun CategoryAddDialog(
                         .fillMaxWidth()
                         .testTag("dialog_category_name_input")
                 )
+
+                // Budget Group Selection (50/30/20) for Expense categories
+                if (defaultType == TransactionType.EXPENSE) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "50/30/20 Budget Group",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val groups = listOf(
+                                com.example.data.model.BudgetGroup.NEEDS,
+                                com.example.data.model.BudgetGroup.WANTS,
+                                com.example.data.model.BudgetGroup.SAVINGS_DEBT
+                            )
+                            groups.forEach { group ->
+                                val isSelected = selectedBudgetGroup == group
+                                val chipLabel = when (group) {
+                                    com.example.data.model.BudgetGroup.NEEDS -> "Needs (50%)"
+                                    com.example.data.model.BudgetGroup.WANTS -> "Wants (30%)"
+                                    com.example.data.model.BudgetGroup.SAVINGS_DEBT -> "Savings/Debt (20%)"
+                                    else -> group.displayName
+                                }
+                                androidx.compose.material3.FilterChip(
+                                    selected = isSelected,
+                                    onClick = { selectedBudgetGroup = group },
+                                    label = { Text(chipLabel, style = MaterialTheme.typography.bodySmall) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Text(
+                            text = when (selectedBudgetGroup) {
+                                com.example.data.model.BudgetGroup.NEEDS -> "Essential living costs (groceries, bills, rent, medicine, transport)."
+                                com.example.data.model.BudgetGroup.WANTS -> "Lifestyle spending (dining out, shopping, hobbies, streaming)."
+                                com.example.data.model.BudgetGroup.SAVINGS_DEBT -> "Debt payments, savings allocation, emergency funds."
+                                else -> ""
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -136,7 +184,8 @@ fun CategoryAddDialog(
                             name = name.trim(),
                             type = defaultType,
                             iconName = iconKey,
-                            colorHex = colorHex
+                            colorHex = colorHex,
+                            budgetGroup = if (defaultType == TransactionType.EXPENSE) selectedBudgetGroup else com.example.data.model.BudgetGroup.NONE
                         )
                         onSave(cat)
                     }

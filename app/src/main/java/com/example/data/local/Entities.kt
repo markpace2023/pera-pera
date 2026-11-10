@@ -171,7 +171,8 @@ data class CategoryEntity(
     val type: String, // TransactionType name
     val iconName: String,
     val colorHex: String,
-    val isDefault: Boolean
+    val isDefault: Boolean,
+    val budgetGroup: String = "NEEDS"
 ) {
     fun toDomain(): Category = Category(
         id = id,
@@ -179,7 +180,8 @@ data class CategoryEntity(
         type = runCatching { TransactionType.valueOf(type) }.getOrDefault(TransactionType.EXPENSE),
         iconName = iconName,
         colorHex = colorHex,
-        isDefault = isDefault
+        isDefault = isDefault,
+        budgetGroup = com.example.data.model.BudgetGroup.fromKey(budgetGroup)
     )
 
     companion object {
@@ -189,7 +191,8 @@ data class CategoryEntity(
             type = category.type.name,
             iconName = category.iconName,
             colorHex = category.colorHex,
-            isDefault = category.isDefault
+            isDefault = category.isDefault,
+            budgetGroup = category.budgetGroup.key
         )
     }
 }

@@ -223,7 +223,8 @@ object DatabaseBackupUtils {
                         type = obj.optString("type", "EXPENSE"),
                         iconName = obj.optString("iconName", "category"),
                         colorHex = obj.optString("colorHex", "#64748B"),
-                        isDefault = obj.optBoolean("isDefault", false)
+                        isDefault = obj.optBoolean("isDefault", false),
+                        budgetGroup = obj.optString("budgetGroup", "NEEDS")
                     )
                 )
             }
@@ -560,6 +561,7 @@ object DatabaseBackupUtils {
                         val iconIdx = cursor.getColumnIndex("iconName")
                         val colorIdx = cursor.getColumnIndex("colorHex")
                         val defaultIdx = cursor.getColumnIndex("isDefault")
+                        val budgetGroupIdx = cursor.getColumnIndex("budgetGroup")
 
                         while (cursor.moveToNext()) {
                             categories.add(
@@ -569,7 +571,8 @@ object DatabaseBackupUtils {
                                     type = if (typeIdx != -1) cursor.getString(typeIdx) else "EXPENSE",
                                     iconName = if (iconIdx != -1) cursor.getString(iconIdx) else "category",
                                     colorHex = if (colorIdx != -1) cursor.getString(colorIdx) else "#64748B",
-                                    isDefault = if (defaultIdx != -1) cursor.getInt(defaultIdx) == 1 else false
+                                    isDefault = if (defaultIdx != -1) cursor.getInt(defaultIdx) == 1 else false,
+                                    budgetGroup = if (budgetGroupIdx != -1) cursor.getString(budgetGroupIdx) else "NEEDS"
                                 )
                             )
                         }

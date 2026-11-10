@@ -349,6 +349,159 @@ class ExampleUnitTest {
         assertTrue(result is com.example.util.CategoryMatchResult.SingleMatch)
         assertEquals(2L, (result as com.example.util.CategoryMatchResult.SingleMatch).category.id)
     }
+
+    @Test
+    fun test503020AutoAdjustingWithFirstAndSecondSalary() {
+        val calendar = Calendar.getInstance()
+        calendar.set(2026, Calendar.NOVEMBER, 1, 10, 0, 0)
+        val day1 = calendar.timeInMillis
+        calendar.set(2026, Calendar.NOVEMBER, 5, 12, 0, 0)
+        val day5 = calendar.timeInMillis
+        calendar.set(2026, Calendar.NOVEMBER, 15, 10, 0, 0)
+        val day15 = calendar.timeInMillis
+        calendar.set(2026, Calendar.NOVEMBER, 20, 10, 0, 0)
+        val day20 = calendar.timeInMillis
+
+        val checkingAcc = Account(id = 1, name = "Checking Account", type = AccountType.DEBIT_CARD, balance = 50000.0)
+        val accounts = listOf(checkingAcc)
+
+        val catGroceries = Category(id = 10, name = "Groceries", type = TransactionType.EXPENSE, iconName = "shopping_cart", colorHex = "#10B981", budgetGroup = com.example.data.model.BudgetGroup.NEEDS)
+        val catDining = Category(id = 11, name = "Dining Out", type = TransactionType.EXPENSE, iconName = "restaurant", colorHex = "#F59E0B", budgetGroup = com.example.data.model.BudgetGroup.WANTS)
+        val categories = listOf(catGroceries, catDining)
+
+        // Day 1: 1st Salary arrives = ₱30,000
+        val txSalary1 = TransactionWithDetails(
+            transaction = Transaction(id = 1, type = TransactionType.INCOME, amount = 30000.0, accountId = 1, title = "1st Cutoff Salary", timestamp = day1),
+            accountName = "Checking Account",
+            accountIcon = "account_balance"
+        )
+
+        // Day 5: Spend ₱8,000 on Groceries (Needs)
+        val txGroceries = TransactionWithDetails(
+            transaction = Transaction(id = 2, type = TransactionType.EXPENSE, amount = 8000.0, accountId = 1, categoryId = 10, title = "Supermarket", timestamp = day5),
+            accountName = "Checking Account",
+            accountIcon = "account_balance",
+            categoryName = "Groceries"
+        )
+
+        val budgetStage1 = com.example.util.Budget503020Service.calculateMonthlyBudget(
+            accounts = accounts,
+            categories = categories,
+            transactions = listOf(txSalary1, txGroceries),
+            monthCalendar = calendar
+        )
+
+        // Check Stage 1 limits & used
+        assertEquals(30000.0, budgetStage1.totalMonthlyIncome, 0.01)
+        assertEquals(15000.0, budgetStage1.needsStatus.allocatedLimit, 0.01) // 50%
+        assertEquals(9000.0, budgetStage1.wantsStatus.allocatedLimit, 0.01)  // 30%
+        assertEquals(6000.0, budgetStage1.savingsDebtStatus.allocatedLimit, 0.01) // 20%
+        assertEquals(8000.0, budgetStage1.needsStatus.usedAmount, 0.01) // ₱8k spent
+        assertEquals(7000.0, budgetStage1.needsStatus.remainingAmount, 0.01) // ₱15k - ₱8k = ₱7k
+
+        // Day 15: 2nd Salary arrives = +₱30,000 (Total ₱60,000)
+        val txSalary2 = TransactionWithDetails(
+            transaction = Transaction(id = 3, type = TransactionType.INCOME, amount = 30000.0, accountId = 1, title = "2nd Cutoff Salary", timestamp = day15),
+            accountName = "Checking Account",
+            accountIcon = "account_balance"
+        )
+
+        val budgetStage2 = com.example.util.Budget503020Service.calculateMonthlyBudget(
+            accounts = accounts,
+            categories = categories,
+            transactions = listOf(txSalary1, txGroceries, txSalary2),
+            monthCalendar = calendar
+        )
+
+        // Check Stage 2: Limits auto-adjust, but used budget stays intact!
+        assertEquals(60000.0, budgetStage2.totalMonthlyIncome, 0.01)
+        assertEquals(30000.0, budgetStage2.needsStatus.allocatedLimit, 0.01) // 50% of 60k
+        assertEquals(18000.0, budgetStage2.wantsStatus.allocatedLimit, 0.01) // 30% of 60k
+        assertEquals(12000.0, budgetStage2.savingsDebtStatus.allocatedLimit, 0.01) // 20% of 60k
+        assertEquals(8000.0, budgetStage2.needsStatus.usedAmount, 0.01) // Used stays ₱8k!
+        assertEquals(22000.0, budgetStage2.needsStatus.remainingAmount, 0.01) // ₱30k - ₱8k = ₱22k remaining!
+
+        // Day 20: Freelance salary arrives = +₱10,000 (Total ₱70,000)
+        val txFreelance = TransactionWithDetails(
+            transaction = Transaction(id = 4, type = TransactionType.INCOME, amount = 10000.0, accountId = 1, title = "Freelance UI Project", timestamp = day20),
+            accountName = "Checking Account",
+            accountIcon = "account_balance"
+        )
+
+        val budgetStage3 = com.example.util.Budget503020Service.calculateMonthlyBudget(
+            accounts = accounts,
+            categories = categories,
+            transactions = listOf(txSalary1, txGroceries, txSalary2, txFreelance),
+            monthCalendar = calendar
+        )
+
+        // Check Stage 3: Auto-adjusts again!
+        assertEquals(70000.0, budgetStage3.totalMonthlyIncome, 0.01)
+        assertEquals(35000.0, budgetStage3.needsStatus.allocatedLimit, 0.01) // 50% of 70k
+        assertEquals(21000.0, budgetStage3.wantsStatus.allocatedLimit, 0.01) // 30% of 70k
+        assertEquals(14000.0, budgetStage3.savingsDebtStatus.allocatedLimit, 0.01) // 20% of 70k
+        assertEquals(8000.0, budgetStage3.needsStatus.usedAmount, 0.01) // Used still stays ₱8k!
+        assertEquals(27000.0, budgetStage3.needsStatus.remainingAmount, 0.01)
+    }
+
+    @Test
+    fun testTransferToSavingsAndLoanPaymentCountsIntoSavingsDebt() {
+        val calendar = Calendar.getInstance()
+        val now = calendar.timeInMillis
+
+        val checkingAcc = Account(id = 1, name = "BDO Checking", type = AccountType.DEBIT_CARD, balance = 80000.0)
+        val savingsAcc = Account(id = 2, name = "Maya High-Yield Savings", type = AccountType.SAVINGS, balance = 20000.0)
+        val ccAcc = Account(id = 3, name = "BPI Gold Credit Card", type = AccountType.CREDIT_CARD, balance = 0.0)
+        val accounts = listOf(checkingAcc, savingsAcc, ccAcc)
+
+        val catSavings = Category(id = 20, name = "Investments", type = TransactionType.EXPENSE, iconName = "trending_up", colorHex = "#8B5CF6", budgetGroup = com.example.data.model.BudgetGroup.SAVINGS_DEBT)
+        val categories = listOf(catSavings)
+
+        // Monthly Income = ₱50,000
+        val txIncome = TransactionWithDetails(
+            transaction = Transaction(id = 1, type = TransactionType.INCOME, amount = 50000.0, accountId = 1, title = "Salary", timestamp = now),
+            accountName = "BDO Checking",
+            accountIcon = "account_balance"
+        )
+
+        // Transfer ₱10,000 to Maya Savings -> COUNTS towards Savings & Debt!
+        val txTransferSavings = TransactionWithDetails(
+            transaction = Transaction(id = 2, type = TransactionType.TRANSFER, amount = 10000.0, accountId = 1, toAccountId = 2, title = "Transfer to Savings", timestamp = now),
+            accountName = "BDO Checking",
+            toAccountName = "Maya High-Yield Savings",
+            accountIcon = "account_balance"
+        )
+
+        // Transfer ₱7,000 to BPI Credit Card -> DOES NOT count towards Savings & Debt per user rule!
+        val txTransferCC = TransactionWithDetails(
+            transaction = Transaction(id = 3, type = TransactionType.TRANSFER, amount = 7000.0, accountId = 1, toAccountId = 3, title = "Pay CC Bill", timestamp = now),
+            accountName = "BDO Checking",
+            toAccountName = "BPI Gold Credit Card",
+            accountIcon = "account_balance"
+        )
+
+        // Loan payment of ₱3,000 -> COUNTS towards Savings & Debt!
+        val txLoanPayment = TransactionWithDetails(
+            transaction = Transaction(id = 4, type = TransactionType.EXPENSE, amount = 3000.0, accountId = 1, isLoanPayment = true, title = "Car Loan Payment", timestamp = now),
+            accountName = "BDO Checking",
+            accountIcon = "account_balance"
+        )
+
+        val budget = com.example.util.Budget503020Service.calculateMonthlyBudget(
+            accounts = accounts,
+            categories = categories,
+            transactions = listOf(txIncome, txTransferSavings, txTransferCC, txLoanPayment),
+            monthCalendar = calendar
+        )
+
+        assertEquals(50000.0, budget.totalMonthlyIncome, 0.01)
+        assertEquals(10000.0, budget.savingsDebtStatus.allocatedLimit, 0.01) // 20% of 50k = 10k
+
+        // Savings & Debt used should be ₱10,000 (savings transfer) + ₱3,000 (loan payment) = ₱13,000.
+        // Credit card transfer of ₱7,000 is excluded!
+        assertEquals(13000.0, budget.savingsDebtStatus.usedAmount, 0.01)
+        assertTrue(budget.savingsDebtStatus.isOverBudget) // 13k > 10k
+    }
 }
 
 

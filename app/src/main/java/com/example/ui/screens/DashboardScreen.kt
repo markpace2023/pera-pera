@@ -90,6 +90,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Divider
 import androidx.compose.material3.FilledTonalButton
 import com.example.ui.components.TransactionDetailDialog
+import com.example.util.Budget503020Service
 import com.example.util.ExchangeRateService
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -861,6 +862,116 @@ fun DashboardScreen(
             }
         }
 
+        // 50/30/20 Auto-Adjusting Budget Snapshot Card
+        item {
+            val monthly503020 = remember(accounts, categories, transactions, primaryCurrency, exchangeRates) {
+                Budget503020Service.calculateMonthlyBudget(
+                    accounts = accounts,
+                    categories = categories,
+                    transactions = transactions,
+                    monthCalendar = Calendar.getInstance(),
+                    primaryCurrency = primaryCurrency,
+                    exchangeRates = exchangeRates
+                )
+            }
+
+            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("dashboard_503020_budget_card"),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(20.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.AccountBalance,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "50/30/20 Monthly Budget",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Auto-adjusts as monthly income arrives",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text(
+                                    text = if (isPrivacyMode) "••••" else DateUtils.formatCurrency(monthly503020.totalMonthlyIncome),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        DashboardBudgetBarRow(
+                            label = "Needs (50%)",
+                            allocated = monthly503020.needsStatus.allocatedLimit,
+                            used = monthly503020.needsStatus.usedAmount,
+                            remaining = monthly503020.needsStatus.remainingAmount,
+                            fraction = monthly503020.needsStatus.progressFraction,
+                            percent = monthly503020.needsStatus.usagePercentage.toInt(),
+                            isOver = monthly503020.needsStatus.isOverBudget,
+                            barColor = Color(0xFF3B82F6),
+                            isPrivacyMode = isPrivacyMode
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        DashboardBudgetBarRow(
+                            label = "Wants (30%)",
+                            allocated = monthly503020.wantsStatus.allocatedLimit,
+                            used = monthly503020.wantsStatus.usedAmount,
+                            remaining = monthly503020.wantsStatus.remainingAmount,
+                            fraction = monthly503020.wantsStatus.progressFraction,
+                            percent = monthly503020.wantsStatus.usagePercentage.toInt(),
+                            isOver = monthly503020.wantsStatus.isOverBudget,
+                            barColor = Color(0xFF8B5CF6),
+                            isPrivacyMode = isPrivacyMode
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        DashboardBudgetBarRow(
+                            label = "Savings & Debt (20%)",
+                            allocated = monthly503020.savingsDebtStatus.allocatedLimit,
+                            used = monthly503020.savingsDebtStatus.usedAmount,
+                            remaining = monthly503020.savingsDebtStatus.remainingAmount,
+                            fraction = monthly503020.savingsDebtStatus.progressFraction,
+                            percent = monthly503020.savingsDebtStatus.usagePercentage.toInt(),
+                            isOver = monthly503020.savingsDebtStatus.isOverBudget,
+                            barColor = Color(0xFF10B981),
+                            isPrivacyMode = isPrivacyMode
+                        )
+                    }
+                }
+            }
+        }
+
         // Credit Card Cutoff Reminders (if any credit cards configured)
         if (creditCardAccounts.isNotEmpty()) {
             item {
@@ -1334,6 +1445,66 @@ fun DashboardScreen(
             exchangeRates = exchangeRates,
             isPrivacyMode = isPrivacyMode,
             onDismiss = { viewingTransaction = null }
+        )
+    }
+}
+
+@Composable
+fun DashboardBudgetBarRow(
+    label: String,
+    allocated: Double,
+    used: Double,
+    remaining: Double,
+    fraction: Float,
+    percent: Int,
+    isOver: Boolean,
+    barColor: Color,
+    isPrivacyMode: Boolean
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = barColor
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = if (isPrivacyMode) "•••• / ••••" else "${DateUtils.formatCurrency(used)} / ${DateUtils.formatCurrency(allocated)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (isOver) MaterialTheme.colorScheme.errorContainer else barColor.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = "$percent%",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isOver) MaterialTheme.colorScheme.error else barColor,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        LinearProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp)),
+            color = if (isOver) MaterialTheme.colorScheme.error else barColor,
+            trackColor = barColor.copy(alpha = 0.15f)
         )
     }
 }

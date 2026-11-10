@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -65,13 +67,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import com.example.data.model.Account
 import com.example.data.model.Budget
+import com.example.data.model.BudgetGroup
 import com.example.data.model.Category
 import com.example.data.model.TransactionType
 import com.example.data.model.TransactionWithDetails
 import com.example.ui.components.IconPickerDialog
 import com.example.ui.components.IconUtils
 import com.example.ui.components.ScreenHeader
+import com.example.util.Budget503020Service
 import com.example.util.CurrencyUtils
 import com.example.util.DateUtils
 import java.util.Calendar
@@ -81,36 +86,44 @@ fun CategoriesScreen(
     categories: List<Category>,
     budgets: List<Budget>,
     transactions: List<TransactionWithDetails>,
+    accounts: List<Account> = emptyList(),
+    primaryCurrency: String = "PHP",
+    exchangeRates: Map<String, Double> = emptyMap(),
     onSaveCategory: (Category) -> Unit,
     onDeleteCategory: (category: Category, targetCategoryId: Long?) -> Unit,
     onSaveBudget: (Budget) -> Unit,
     onTestBudgetNotification: (categoryName: String, percent: Int, spentFormatted: String, limitFormatted: String) -> Unit
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Expense, 1 = Income
+    var selectedBudgetGroupFilter by remember { mutableStateOf<BudgetGroup?>(null) } // null = All
     var showCategoryDialog by remember { mutableStateOf(false) }
     var categoryToEdit by remember { mutableStateOf<Category?>(null) }
     var budgetCategoryToEdit by remember { mutableStateOf<Category?>(null) }
     var categoryPendingDelete by remember { mutableStateOf<Category?>(null) }
 
     val currentType = if (selectedTab == 0) TransactionType.EXPENSE else TransactionType.INCOME
-    val filteredCategories = categories.filter { it.type == currentType }
+
+    // Calculate 50/30/20 live auto-adjusting monthly budget
+    val monthlyBudget = remember(accounts, categories, transactions, primaryCurrency, exchangeRates) {
+        Budget503020Service.calculateMonthlyBudget(
+            accounts = accounts,
+            categories = categories,
+            transactions = transactions,
+            monthCalendar = Calendar.getInstance(),
+            primaryCurrency = primaryCurrency,
+            exchangeRates = exchangeRates
+        )
+    }
+
+    val filteredCategories = categories.filter { cat ->
+        cat.type == currentType && (
+            selectedTab != 0 || selectedBudgetGroupFilter == null || cat.budgetGroup == selectedBudgetGroupFilter
+        )
+    }
 
     // Calculate monthly spent per category for current month
     val currentMonthRange = remember {
-        val cal = Calendar.getInstance()
-        cal.set(Calendar.DAY_OF_MONTH, 1)
-        cal.set(Calendar.HOUR_OF_DAY, 0)
-        cal.set(Calendar.MINUTE, 0)
-        cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MILLISECOND, 0)
-        val start = cal.timeInMillis
-        cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
-        cal.set(Calendar.HOUR_OF_DAY, 23)
-        cal.set(Calendar.MINUTE, 59)
-        cal.set(Calendar.SECOND, 59)
-        cal.set(Calendar.MILLISECOND, 999)
-        val end = cal.timeInMillis
-        Pair(start, end)
+        Budget503020Service.getMonthRange()
     }
 
     val currentMonthTransactions = remember(transactions, currentMonthRange) {
@@ -177,15 +190,230 @@ fun CategoriesScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(filteredCategories, key = { it.id }) { cat ->
-                    val budget = budgets.find { it.categoryId == cat.id }
-                    val spent = spendByCategory[cat.id] ?: 0.0
-                    val limit = budget?.monthlyLimit ?: 0.0
-                    val fraction = if (limit > 0) (spent / limit).toFloat().coerceIn(0f, 1.5f) else 0f
-                    val percent = if (limit > 0) ((spent / limit) * 100).toInt() else 0
+                if (selectedTab == 0) {
+                    // 50/30/20 Shared Budget Overview Card
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("budget_503020_card"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            ),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "50-30-20 Auto Budget",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = monthlyBudget.monthYearLabel,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
 
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer
+                                    ) {
+                                        Text(
+                                            text = "Income-Adjusting",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Monthly Income Display & Metrics
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "Monthly Income",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = DateUtils.formatCurrency(monthlyBudget.totalMonthlyIncome),
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text(
+                                            text = "Total Spent & Saved",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = DateUtils.formatCurrency(monthlyBudget.totalSpentAndSaved),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (monthlyBudget.netRemaining < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text(
+                                    text = if (monthlyBudget.hasIncome) {
+                                        "Budgets auto-adjust as income arrives this month. Shared between member categories."
+                                    } else {
+                                        "No income recorded yet this month. Limits will auto-calculate when salary or income is added."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                Spacer(modifier = Modifier.height(14.dp))
+
+                                // 50/30/20 Multi-Segment Ratio Bar
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(10.dp)
+                                            .clip(RoundedCornerShape(5.dp))
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(50f)
+                                                .fillMaxSize()
+                                                .background(Color(0xFF3B82F6))
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(30f)
+                                                .fillMaxSize()
+                                                .background(Color(0xFF8B5CF6))
+                                        )
+                                        Spacer(modifier = Modifier.width(2.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(20f)
+                                                .fillMaxSize()
+                                                .background(Color(0xFF10B981))
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text("Needs (50%)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF3B82F6), fontWeight = FontWeight.Bold)
+                                        Text("Wants (30%)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF8B5CF6), fontWeight = FontWeight.Bold)
+                                        Text("Savings & Debt (20%)", style = MaterialTheme.typography.labelSmall, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // 3 Dedicated Bucket Progress Cards
+                                // 1. Needs (50%)
+                                BudgetBucketProgressItem(
+                                    title = "Needs (50%)",
+                                    subtitle = "Rent, groceries, utilities, health, transport",
+                                    status = monthlyBudget.needsStatus,
+                                    barColor = Color(0xFF3B82F6),
+                                    onTestNotification = onTestBudgetNotification
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // 2. Wants (30%)
+                                BudgetBucketProgressItem(
+                                    title = "Wants (30%)",
+                                    subtitle = "Dining out, shopping, hobbies, leisure, travel",
+                                    status = monthlyBudget.wantsStatus,
+                                    barColor = Color(0xFF8B5CF6),
+                                    onTestNotification = onTestBudgetNotification
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // 3. Savings & Debt (20%)
+                                BudgetBucketProgressItem(
+                                    title = "Savings & Debt (20%)",
+                                    subtitle = "Savings transfers & loan payments (CC excluded)",
+                                    status = monthlyBudget.savingsDebtStatus,
+                                    barColor = Color(0xFF10B981),
+                                    onTestNotification = onTestBudgetNotification
+                                )
+                            }
+                        }
+                    }
+
+                    // Filter Chips to filter categories by 50/30/20 group
+                    item {
+                        Column {
+                            Text(
+                                text = "Expense Categories",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilterChip(
+                                    selected = selectedBudgetGroupFilter == null,
+                                    onClick = { selectedBudgetGroupFilter = null },
+                                    label = { Text("All (${categories.count { it.type == TransactionType.EXPENSE }})") },
+                                    modifier = Modifier.testTag("filter_chip_all")
+                                )
+                                FilterChip(
+                                    selected = selectedBudgetGroupFilter == BudgetGroup.NEEDS,
+                                    onClick = { selectedBudgetGroupFilter = BudgetGroup.NEEDS },
+                                    label = { Text("Needs (${monthlyBudget.needsStatus.memberCategories.size})") },
+                                    modifier = Modifier.testTag("filter_chip_needs")
+                                )
+                                FilterChip(
+                                    selected = selectedBudgetGroupFilter == BudgetGroup.WANTS,
+                                    onClick = { selectedBudgetGroupFilter = BudgetGroup.WANTS },
+                                    label = { Text("Wants (${monthlyBudget.wantsStatus.memberCategories.size})") },
+                                    modifier = Modifier.testTag("filter_chip_wants")
+                                )
+                                FilterChip(
+                                    selected = selectedBudgetGroupFilter == BudgetGroup.SAVINGS_DEBT,
+                                    onClick = { selectedBudgetGroupFilter = BudgetGroup.SAVINGS_DEBT },
+                                    label = { Text("Savings & Debt (${monthlyBudget.savingsDebtStatus.memberCategories.size})") },
+                                    modifier = Modifier.testTag("filter_chip_savings_debt")
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Render Categories
+                items(filteredCategories, key = { it.id }) { cat ->
+                    val spent = spendByCategory[cat.id] ?: 0.0
                     val catColor = runCatching { Color(android.graphics.Color.parseColor(cat.colorHex)) }.getOrDefault(MaterialTheme.colorScheme.primary)
 
                     Card(
@@ -202,7 +430,10 @@ fun CategoriesScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
                                     Box(
                                         modifier = Modifier
                                             .size(42.dp)
@@ -220,12 +451,46 @@ fun CategoriesScreen(
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
-                                    Column {
-                                        Text(
-                                            text = cat.name,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = cat.name,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+
+                                            // 50/30/20 Group Badge for Expense categories
+                                            if (cat.type == TransactionType.EXPENSE) {
+                                                val (badgeBg, badgeText) = when (cat.budgetGroup) {
+                                                    BudgetGroup.NEEDS -> Color(0xFF3B82F6).copy(alpha = 0.15f) to "Needs"
+                                                    BudgetGroup.WANTS -> Color(0xFF8B5CF6).copy(alpha = 0.15f) to "Wants"
+                                                    BudgetGroup.SAVINGS_DEBT -> Color(0xFF10B981).copy(alpha = 0.15f) to "Savings/Debt"
+                                                    BudgetGroup.NONE -> Color.Gray.copy(alpha = 0.15f) to "None"
+                                                }
+                                                val badgeColor = when (cat.budgetGroup) {
+                                                    BudgetGroup.NEEDS -> Color(0xFF2563EB)
+                                                    BudgetGroup.WANTS -> Color(0xFF7C3AED)
+                                                    BudgetGroup.SAVINGS_DEBT -> Color(0xFF059669)
+                                                    BudgetGroup.NONE -> Color.DarkGray
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = badgeBg
+                                                ) {
+                                                    Text(
+                                                        text = badgeText,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = badgeColor,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
                                         Text(
                                             text = "Spent this month: ${DateUtils.formatCurrency(spent)}",
                                             style = MaterialTheme.typography.bodySmall,
@@ -235,17 +500,12 @@ fun CategoriesScreen(
                                 }
 
                                 Row {
-                                    if (currentType == TransactionType.EXPENSE) {
-                                        TextButton(onClick = { budgetCategoryToEdit = cat }) {
-                                            Text(if (limit > 0) "Edit Budget" else "+ Budget")
-                                        }
-                                    }
                                     IconButton(
                                         onClick = {
                                             categoryToEdit = cat
                                             showCategoryDialog = true
                                         },
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(32.dp).testTag("edit_category_btn_${cat.id}")
                                     ) {
                                         Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                     }
@@ -256,59 +516,6 @@ fun CategoriesScreen(
                                         Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                                     }
                                 }
-                            }
-
-                            // Budget progress bar (if expense category has budget)
-                            if (currentType == TransactionType.EXPENSE && limit > 0) {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "${DateUtils.formatCurrency(spent)} of ${DateUtils.formatCurrency(limit)} ($percent%)",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (percent >= 100) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-
-                                    if (percent >= 80) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.clickable {
-                                                onTestBudgetNotification(
-                                                    cat.name,
-                                                    percent,
-                                                    DateUtils.formatCurrency(spent),
-                                                    DateUtils.formatCurrency(limit)
-                                                )
-                                            }
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.NotificationsActive,
-                                                contentDescription = "Test alert",
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(
-                                                text = if (percent >= 100) "Over Budget!" else "Near Depletion!",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.error
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                LinearProgressIndicator(
-                                    progress = { fraction.coerceIn(0f, 1f) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(6.dp)
-                                        .clip(RoundedCornerShape(3.dp)),
-                                    color = if (percent >= 100) MaterialTheme.colorScheme.error else if (percent >= 80) Color(0xFFF59E0B) else MaterialTheme.colorScheme.primary,
-                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
                             }
                         }
                     }
@@ -633,9 +840,11 @@ fun CategoryEditDialog(
     onSave: (Category) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val isExpense = (category?.type ?: defaultType) == TransactionType.EXPENSE
     var name by remember { mutableStateOf(category?.name ?: "") }
     var colorHex by remember { mutableStateOf(category?.colorHex ?: "#10B981") }
     var iconKey by remember { mutableStateOf(category?.iconName ?: "restaurant") }
+    var selectedBudgetGroup by remember { mutableStateOf(category?.budgetGroup ?: BudgetGroup.NEEDS) }
     var showIconPicker by remember { mutableStateOf(false) }
 
     val presetColors = listOf(
@@ -649,7 +858,7 @@ fun CategoryEditDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 440.dp)
+                    .heightIn(max = 480.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -663,6 +872,48 @@ fun CategoryEditDialog(
                         .fillMaxWidth()
                         .testTag("cat_name_input")
                 )
+
+                // Budget Group Selection (50/30/20) for Expense Categories
+                if (isExpense) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "50/30/20 Budget Group",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val groups = listOf(BudgetGroup.NEEDS, BudgetGroup.WANTS, BudgetGroup.SAVINGS_DEBT)
+                            groups.forEach { group ->
+                                val isSelected = selectedBudgetGroup == group
+                                val chipLabel = when (group) {
+                                    BudgetGroup.NEEDS -> "Needs (50%)"
+                                    BudgetGroup.WANTS -> "Wants (30%)"
+                                    BudgetGroup.SAVINGS_DEBT -> "Savings/Debt (20%)"
+                                    else -> group.displayName
+                                }
+                                androidx.compose.material3.FilterChip(
+                                    selected = isSelected,
+                                    onClick = { selectedBudgetGroup = group },
+                                    label = { Text(chipLabel, style = MaterialTheme.typography.bodySmall) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Text(
+                            text = when (selectedBudgetGroup) {
+                                BudgetGroup.NEEDS -> "Essential living costs (groceries, bills, rent, medicine, transport)."
+                                BudgetGroup.WANTS -> "Lifestyle spending (dining out, shopping, hobbies, streaming)."
+                                BudgetGroup.SAVINGS_DEBT -> "Debt payments, savings allocation, emergency funds."
+                                else -> ""
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -720,7 +971,8 @@ fun CategoryEditDialog(
                             name = name.trim(),
                             type = category?.type ?: defaultType,
                             iconName = iconKey,
-                            colorHex = colorHex
+                            colorHex = colorHex,
+                            budgetGroup = if (isExpense) selectedBudgetGroup else BudgetGroup.NONE
                         )
                         onSave(cat)
                     }
@@ -818,4 +1070,110 @@ fun BudgetEditDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+fun BudgetBucketProgressItem(
+    title: String,
+    subtitle: String,
+    status: com.example.util.BudgetBucketStatus,
+    barColor: Color,
+    onTestNotification: (categoryName: String, percent: Int, spentFormatted: String, limitFormatted: String) -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = barColor
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (status.isOverBudget) {
+                        MaterialTheme.colorScheme.errorContainer
+                    } else if (status.isNearDepletion) {
+                        Color(0xFFFEF3C7)
+                    } else {
+                        barColor.copy(alpha = 0.15f)
+                    }
+                ) {
+                    Text(
+                        text = "${status.usagePercentage.toInt()}% used",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (status.isOverBudget) {
+                            MaterialTheme.colorScheme.error
+                        } else if (status.isNearDepletion) {
+                            Color(0xFFD97706)
+                        } else {
+                            barColor
+                        },
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Progress Bar
+            LinearProgressIndicator(
+                progress = { status.progressFraction },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(4.dp)),
+                color = if (status.isOverBudget) MaterialTheme.colorScheme.error else barColor,
+                trackColor = barColor.copy(alpha = 0.15f)
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Limit, Used, Remaining
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Allocated: ${DateUtils.formatCurrency(status.allocatedLimit)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Used: ${DateUtils.formatCurrency(status.usedAmount)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (status.isOverBudget) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (status.remainingAmount >= 0) {
+                        "Left: ${DateUtils.formatCurrency(status.remainingAmount)}"
+                    } else {
+                        "Over: ${DateUtils.formatCurrency(-status.remainingAmount)}"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = if (status.remainingAmount >= 0) barColor else MaterialTheme.colorScheme.error
+                )
+            }
+        }
+    }
 }
