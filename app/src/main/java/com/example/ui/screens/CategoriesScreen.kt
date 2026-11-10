@@ -358,7 +358,7 @@ fun CategoriesScreen(
                                 // 3. Savings & Debt (20%)
                                 BudgetBucketProgressItem(
                                     title = "Savings & Debt (20%)",
-                                    subtitle = "Savings transfers & loan payments (CC excluded)",
+                                    subtitle = "Savings deposits & loan payments",
                                     status = monthlyBudget.savingsDebtStatus,
                                     barColor = Color(0xFF10B981),
                                     onTestNotification = onTestBudgetNotification

@@ -3,16 +3,18 @@
 The SpendFlow debug APK has been built and placed in the project root directory:
 
 - **Filename**: `SpendFlow-debug.apk`
-- **Path**: `/SpendFlow-debug.apk` (located in root directory)
-- **Version**: `1.1` (`versionCode = 2`, `versionName = "1.1"`)
+- **Path**: `./SpendFlow-debug.apk` (and `.build-outputs/app-debug.apk`)
+- **Version**: `1.3` (`versionCode = 4`, `versionName = "1.3"`)
 - **Size**: ~25 MB
 - **Latest Features Included**:
   - **50-30-20 Income-Based Auto-Adjusting Budget**:
     - **Dynamic Live Auto-Adjustment**: Budgets automatically calculate based on actual incoming monthly income. When the 1st of the month salary arrives, the budget automatically divides into 50% Needs, 30% Wants, and 20% Savings/Debt. When the 15th of the month salary arrives (or freelance/business income arrives), the budget limits auto-scale up dynamically while your already-spent amounts stay intact!
+    - **Direct Income towards Savings Accounts**: Any kind of income directly credited towards a **Savings** account (e.g., interest earned, direct deposit to savings) expands total monthly income limits AND is automatically added to the **Savings & Debt (20%)** counter.
     - **Shared Budgets Between Categories**: Budgets are shared by bucket (`Needs`, `Wants`, `Savings & Debt`) rather than rigid per-category limits.
     - **New Category Budget Group Selector**: When adding or editing a category, users choose which 50/30/20 group it belongs to (`Needs (50%)`, `Wants (30%)`, or `Savings & Debt (20%)`).
     - **Smart Transfer & Loan Accounting**:
       - Transfers into `SAVINGS` accounts automatically count towards the **Savings & Debt (20%)** bucket.
+      - Transfers between `SAVINGS → SAVINGS` accounts are automatically excluded (moving existing savings between accounts/stashes does not count as new savings).
       - Transfers into `CREDIT_CARD` accounts are excluded from Savings & Debt (credit card purchases are already categorized under Needs/Wants).
       - Loan repayments and debt payments count towards **Savings & Debt (20%)**.
     - **Interactive Visual Distribution Graphs & Progress Bars**:

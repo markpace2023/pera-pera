@@ -1,4 +1,4 @@
-# SpendFlow 💳 📊 (v1.1)
+# SpendFlow 💳 📊 (v1.3)
 
 DISCLAIMER: APP BUILT WITH Google aistudio
 
@@ -36,7 +36,7 @@ If you are a tester or user and want to evaluate SpendFlow:
 
 ### 1. Download the APK
 - Download the pre-built debug APK directly from the repository root:
-  - **File:** `SpendFlow-debug.apk` (Version 1.1)
+  - **File:** `SpendFlow-debug.apk` (Version 1.3, versionCode 4)
   - Also available via the top-right Settings menu (**Export / Download APK/AAB**).
 - Or transfer it to your Android device via USB/Drive.
 
@@ -55,8 +55,10 @@ If you are a tester or user and want to evaluate SpendFlow:
   4. Record an expense (e.g. ₱8,000 groceries under Needs).
   5. Record a 2nd cutoff salary on the 15th (e.g., +₱30,000 → Total ₱60,000):
      - The limits automatically expand (Needs = ₱30,000, Wants = ₱18,000, Savings & Debt = ₱12,000) while your existing spent amount stays at ₱8,000!
-  6. **Transfer Rules**:
+  6. **Transfer & Income Rules for Savings**:
+     - **Direct Income to Savings**: Any kind of income directly credited towards a **Savings** account (e.g. interest earned, savings deposit) expands the monthly budget limits AND is automatically added to the **Savings & Debt (20%)** counter.
      - Transfer funds to a **Savings** account: automatically counts towards the **Savings & Debt (20%)** bucket.
+     - Transfer between **Savings → Savings** accounts: automatically **excluded** (moving money between savings stashes does not count as new savings).
      - Transfer funds to a **Credit Card** account: automatically excluded (since individual card purchases are already categorized under Needs/Wants).
      - Pay a loan: automatically counts towards **Savings & Debt (20%)**.
   7. Check the **Dashboard** to see the 50/30/20 budget snapshot card with live progress bars.
@@ -168,7 +170,7 @@ SpendFlow/
 
 - **Live Auto-Adjustment**: Limits dynamically scale with total monthly income.
 - **Shared Category Pools**: Categories are grouped into **Needs (50%)**, **Wants (30%)**, and **Savings & Debt (20%)**.
-- **Smart Transfer Accounting**: Transfers to savings accounts count as savings; credit card transfers are excluded; loan repayments count towards savings & debt.
+- **Smart Transfer Accounting**: Transfers to savings accounts count as savings; internal transfers between savings accounts are excluded; credit card transfers are excluded; loan repayments count towards savings & debt.
 - **Visual Progress Tracking**: Multi-segment ratio bars and dedicated progress cards for each bucket.
 
 ---

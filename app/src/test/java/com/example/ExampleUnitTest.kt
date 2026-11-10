@@ -502,6 +502,95 @@ class ExampleUnitTest {
         assertEquals(13000.0, budget.savingsDebtStatus.usedAmount, 0.01)
         assertTrue(budget.savingsDebtStatus.isOverBudget) // 13k > 10k
     }
+
+    @Test
+    fun testTransferFromSavingsToSavingsDoesNotCountIntoSavingsDebt() {
+        val calendar = Calendar.getInstance()
+        val now = calendar.timeInMillis
+
+        val checkingAcc = Account(id = 1, name = "Checking Account", type = AccountType.DEBIT_CARD, balance = 50000.0)
+        val savingsAcc1 = Account(id = 2, name = "Emergency Savings", type = AccountType.SAVINGS, balance = 30000.0)
+        val savingsAcc2 = Account(id = 3, name = "High-Yield Stash", type = AccountType.SAVINGS, balance = 10000.0)
+        val accounts = listOf(checkingAcc, savingsAcc1, savingsAcc2)
+
+        // Monthly Income = ₱50,000
+        val txIncome = TransactionWithDetails(
+            transaction = Transaction(id = 1, type = TransactionType.INCOME, amount = 50000.0, accountId = 1, title = "Salary", timestamp = now),
+            accountName = "Checking Account",
+            accountIcon = "account_balance"
+        )
+
+        // Transfer ₱5,000 from Checking to Emergency Savings -> COUNTS towards Savings & Debt!
+        val txCheckingToSavings = TransactionWithDetails(
+            transaction = Transaction(id = 2, type = TransactionType.TRANSFER, amount = 5000.0, accountId = 1, toAccountId = 2, title = "Save to Emergency", timestamp = now),
+            accountName = "Checking Account",
+            toAccountName = "Emergency Savings",
+            accountIcon = "account_balance"
+        )
+
+        // Transfer ₱4,000 from Emergency Savings to High-Yield Stash (Savings -> Savings) -> DOES NOT COUNT per user rule!
+        val txSavingsToSavings = TransactionWithDetails(
+            transaction = Transaction(id = 3, type = TransactionType.TRANSFER, amount = 4000.0, accountId = 2, toAccountId = 3, title = "Move between savings", timestamp = now),
+            accountName = "Emergency Savings",
+            toAccountName = "High-Yield Stash",
+            accountIcon = "account_balance"
+        )
+
+        val budget = com.example.util.Budget503020Service.calculateMonthlyBudget(
+            accounts = accounts,
+            categories = emptyList(),
+            transactions = listOf(txIncome, txCheckingToSavings, txSavingsToSavings),
+            monthCalendar = calendar
+        )
+
+        assertEquals(50000.0, budget.totalMonthlyIncome, 0.01)
+        assertEquals(10000.0, budget.savingsDebtStatus.allocatedLimit, 0.01)
+
+        // Only the ₱5,000 deposit from checking counts. The ₱4,000 savings-to-savings transfer is excluded!
+        assertEquals(5000.0, budget.savingsDebtStatus.usedAmount, 0.01)
+        assertEquals(5000.0, budget.savingsDebtStatus.remainingAmount, 0.01)
+    }
+
+    @Test
+    fun testIncomeDirectlyIntoSavingsAccountCountsTowardsSavingsDebtCounter() {
+        val calendar = Calendar.getInstance()
+        val now = calendar.timeInMillis
+
+        val checkingAcc = Account(id = 1, name = "Checking Account", type = AccountType.DEBIT_CARD, balance = 50000.0)
+        val savingsAcc = Account(id = 2, name = "High-Yield Savings", type = AccountType.SAVINGS, balance = 20000.0)
+        val accounts = listOf(checkingAcc, savingsAcc)
+
+        // 1. Regular salary income deposited into Checking Account (₱40,000)
+        val txSalaryChecking = TransactionWithDetails(
+            transaction = Transaction(id = 1, type = TransactionType.INCOME, amount = 40000.0, accountId = 1, title = "Salary in Checking", timestamp = now),
+            accountName = "Checking Account",
+            accountIcon = "account_balance"
+        )
+
+        // 2. Direct income into Savings Account: e.g. Monthly Bank Interest or Direct Bonus (₱2,500)
+        val txInterestSavings = TransactionWithDetails(
+            transaction = Transaction(id = 2, type = TransactionType.INCOME, amount = 2500.0, accountId = 2, title = "Savings Interest Earned", timestamp = now),
+            accountName = "High-Yield Savings",
+            accountIcon = "savings"
+        )
+
+        val budget = com.example.util.Budget503020Service.calculateMonthlyBudget(
+            accounts = accounts,
+            categories = emptyList(),
+            transactions = listOf(txSalaryChecking, txInterestSavings),
+            monthCalendar = calendar
+        )
+
+        // Total Monthly Income = 40,000 + 2,500 = 42,500
+        assertEquals(42500.0, budget.totalMonthlyIncome, 0.01)
+
+        // 20% Savings/Debt Limit = 42,500 * 0.20 = 8,500
+        assertEquals(8500.0, budget.savingsDebtStatus.allocatedLimit, 0.01)
+
+        // The ₱2,500 income deposited directly into savings account is automatically added to the savings counter!
+        assertEquals(2500.0, budget.savingsDebtStatus.usedAmount, 0.01)
+        assertEquals(6000.0, budget.savingsDebtStatus.remainingAmount, 0.01)
+    }
 }
 
 

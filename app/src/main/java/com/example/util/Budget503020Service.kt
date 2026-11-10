@@ -167,6 +167,7 @@ object Budget503020Service {
                 }
 
                 TransactionType.TRANSFER -> {
+                    val fromAccount = tx.accountId.let { accountMap[it] }
                     val toAccount = tx.toAccountId?.let { accountMap[it] }
 
                     // Per user instructions:
@@ -181,14 +182,23 @@ object Budget503020Service {
                         continue
                     }
 
-                    // 3) Transferring to savings account counts into savings/debt
+                    // 3) Do NOT include savings -> savings transfers (internal transfer between savings accounts does not count as new savings)
+                    if (isSavingsDestinationAccount(fromAccount) && isSavingsDestinationAccount(toAccount)) {
+                        continue
+                    }
+
+                    // 4) Transferring to savings account counts into savings/debt
                     if (isSavingsDestinationAccount(toAccount)) {
                         savingsDebtTransactions.add(item)
                     }
                 }
 
                 TransactionType.INCOME -> {
-                    // Income is counted towards budget limits, not spent amounts
+                    // Per user instruction: Any kind of income towards savings accounts will be added to savings counter
+                    val targetAccount = tx.accountId.let { accountMap[it] }
+                    if (isSavingsDestinationAccount(targetAccount)) {
+                        savingsDebtTransactions.add(item)
+                    }
                 }
             }
         }
